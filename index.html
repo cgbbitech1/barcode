@@ -1,0 +1,273 @@
+<!-- Part swap scanner: scan old + new serial per part, copy all -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{--ink:#1d2733;--steel:#3c4c5e;--panel:#eef1f4;--line:#c9d1da;--signal:#f2b705;--warn:#b3261e;--ok:#1f7a4d;--old:#8a5a00;--new:#1f5fa8}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;background:var(--panel);color:var(--ink)}
+  .wrap{max-width:560px;margin:0 auto;padding:16px}
+  h1{font-size:1.35rem;margin:4px 0 12px}
+  h2{font-size:1rem;margin:18px 0 8px;display:flex;justify-content:space-between;align-items:baseline}
+  h2 span{font-weight:400;color:var(--steel);font-size:.88rem}
+  .parts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+  .part{font:inherit;font-weight:600;font-size:.88rem;padding:10px 4px;border-radius:8px;border:2px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;position:relative}
+  .part[aria-pressed=true]{border-color:var(--ink);background:var(--ink);color:#fff}
+  .part .tick{display:block;font-size:.72rem;font-weight:400;opacity:.8;margin-top:2px}
+  .next{margin:12px 0;background:#fff;border-radius:8px;border:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;gap:12px}
+  .badge{font-weight:700;font-size:.8rem;padding:4px 10px;border-radius:999px;color:#fff;white-space:nowrap}
+  .badge.old{background:var(--old)} .badge.new{background:var(--new)} .badge.done{background:var(--ok)}
+  .next .txt{flex:1;font-size:.95rem} .next .txt b{font-size:1.05rem}
+  .viewer{position:relative;background:var(--ink);border-radius:10px;overflow:hidden;min-height:200px;display:grid;place-items:center}
+  #video{width:100%;display:none}
+  #reader{width:100%} #reader video{width:100%!important;height:auto!important;display:block}
+  .guide{position:absolute;left:5%;right:5%;top:32%;bottom:32%;border:3px solid var(--signal);border-radius:6px;box-shadow:0 0 0 999px rgba(0,0,0,.35);display:none;pointer-events:none}
+  .guide::after{content:"";position:absolute;left:0;right:0;top:50%;height:2px;background:var(--warn);opacity:.8}
+  .idle{color:#aeb9c5;text-align:center;padding:24px;font-size:.95rem;line-height:1.5}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  button.b,label.btn{font:inherit;font-weight:600;border:0;border-radius:8px;padding:12px 14px;cursor:pointer;flex:1;text-align:center;min-width:120px}
+  .primary{background:var(--signal);color:var(--ink)} .secondary{background:var(--steel);color:#fff}
+  .ghost{background:transparent;color:var(--steel);border:1px solid var(--line)!important}
+  button:focus-visible,label.btn:focus-within,input:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+  input[type=file]{position:absolute;opacity:0;width:1px;height:1px}
+  .manual{display:flex;gap:8px;margin-top:8px}
+  .manual input{flex:1;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:8px;text-transform:uppercase;min-width:0}
+  .manual button{flex:0;min-width:80px}
+  .status{font-size:.86rem;color:var(--steel);margin:8px 2px;min-height:1.2em}
+  .status.err{color:var(--warn)} .status.ok{color:var(--ok)}
+  .log{display:grid;gap:8px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .card.active{border-color:var(--ink);box-shadow:inset 4px 0 0 var(--signal)}
+  .card header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#f7f9fb;border-bottom:1px solid var(--line)}
+  .card header b{font-size:.95rem}
+  .card header div{display:flex;gap:6px}
+  .sm{font:inherit;font-size:.8rem;font-weight:600;padding:5px 10px;border-radius:6px;background:transparent;color:var(--steel);border:1px solid var(--line);cursor:pointer}
+  .slot{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+  .slot:last-child{border-bottom:0}
+  .slot.target{background:#fff8dc}
+  .slot .sn{flex:1;font-weight:700;word-break:break-all;font-size:1.05rem}
+  .slot .sn.empty{font-weight:400;color:#8995a1;font-size:.9rem}
+  .slot .badge{min-width:44px;text-align:center}
+  #filereader{display:none}
+</style>
+
+<div class="wrap">
+  <h1>Part swap scanner</h1>
+
+  <h2>Part</h2>
+  <div class="parts" id="parts"></div>
+
+  <div class="next" id="next"></div>
+
+  <div class="viewer">
+    <video id="video" playsinline muted></video>
+    <div id="reader"></div>
+    <div class="guide" id="guide"></div>
+    <div class="idle" id="idle">Camera is off.<br>Tap <b>Start camera</b>, or scan a photo of the label.</div>
+  </div>
+
+  <div class="row">
+    <button class="b primary" id="toggle">Start camera</button>
+    <label class="btn secondary">Scan a photo<input type="file" id="file" accept="image/*"></label>
+  </div>
+  <div class="manual">
+    <input id="manualIn" placeholder="Or type the serial number" autocomplete="off" autocapitalize="characters">
+    <button class="b ghost" id="manualAdd">Add</button>
+  </div>
+  <div class="status" id="status" role="status"></div>
+
+  <h2>Scan log <span id="count">0 of 4 parts</span></h2>
+  <div class="log" id="log"></div>
+  <div class="row">
+    <button class="b primary" id="copyAll">Copy all</button>
+    <button class="b ghost" id="csv">Export CSV</button>
+    <button class="b ghost" id="clear">Clear all</button>
+  </div>
+  <label style="display:block;margin:12px 2px;font-size:.9rem;color:var(--steel)"><input type="checkbox" id="beep" checked> Beep on scan</label>
+  <div id="filereader"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const PARTS=["Fuser","Drum","Transfer Belt","Developer"];
+const data=Object.fromEntries(PARTS.map(p=>[p,{old:"",new:""}]));
+let part="Fuser", target="old";   // what the next scan fills
+const status=(msg,kind)=>{const s=$("status");s.textContent=msg||"";s.className="status"+(kind?" "+kind:"");};
+
+/* ---------- Part selection + targeting ---------- */
+function autoTarget(){ const d=data[part]; target=!d.old?"old":!d.new?"new":null; }
+function selectPart(p){ part=p; autoTarget(); status(""); renderAll(); }
+function setTarget(p,slot){ part=p; target=slot; status(`Rescanning ${slot==="old"?"Old":"New"} ${p}.`); renderAll(); }
+
+function renderParts(){
+  $("parts").innerHTML="";
+  PARTS.forEach(p=>{
+    const d=data[p], b=document.createElement("button");
+    b.className="part"; b.setAttribute("aria-pressed",p===part);
+    const state=d.old&&d.new?"✓ Done":d.old?"Old ✓":"—";
+    b.innerHTML=`${p}<span class="tick">${state}</span>`;
+    b.onclick=()=>selectPart(p);
+    $("parts").appendChild(b);
+  });
+}
+function renderNext(){
+  const n=$("next");
+  if(target){
+    n.innerHTML=`<span class="badge ${target}">${target==="old"?"Old":"New"}</span><div class="txt">Next scan: <b>${target==="old"?"Old":"New"} ${part}</b><br><small>${target==="old"?"Scan the part you removed.":"Scan the replacement part."}</small></div>`;
+  }else{
+    const left=PARTS.filter(p=>!(data[p].old&&data[p].new));
+    n.innerHTML=`<span class="badge done">Done</span><div class="txt"><b>${part} complete.</b><br><small>${left.length?"Pick another part, or tap a serial below to rescan it.":"All parts scanned. Tap Copy all."}</small></div>`;
+  }
+}
+function renderLog(){
+  const log=$("log"); log.innerHTML="";
+  let done=0;
+  PARTS.forEach(p=>{
+    const d=data[p]; if(d.old&&d.new) done++;
+    const c=document.createElement("div");
+    c.className="card"+(p===part?" active":"");
+    c.innerHTML=`<header><b></b><div><button class="sm" data-a="copy">Copy</button><button class="sm" data-a="clr">Clear</button></div></header>`;
+    c.querySelector("b").textContent=p;
+    ["old","new"].forEach(slot=>{
+      const r=document.createElement("div");
+      r.className="slot"+(p===part&&target===slot?" target":"");
+      r.innerHTML=`<span class="badge ${slot}">${slot==="old"?"Old":"New"}</span><span class="sn"></span>`;
+      const sn=r.querySelector(".sn");
+      if(d[slot]) sn.textContent=d[slot]; else {sn.textContent="Tap to scan"; sn.classList.add("empty");}
+      r.onclick=()=>setTarget(p,slot);
+      c.appendChild(r);
+    });
+    c.querySelector('[data-a="copy"]').onclick=e=>{e.stopPropagation(); if(d.old||d.new) copy(partText(p),e.target);};
+    c.querySelector('[data-a="clr"]').onclick=e=>{e.stopPropagation(); data[p]={old:"",new:""}; if(p===part) autoTarget(); renderAll();};
+    log.appendChild(c);
+  });
+  $("count").textContent=`${done} of 4 parts`;
+}
+function renderAll(){renderParts();renderNext();renderLog();}
+
+/* ---------- Copy / export ---------- */
+function partText(p){const d=data[p];return `${p}\nOld: ${d.old||"-"}\nNew: ${d.new||"-"}`;}
+function allText(){return PARTS.filter(p=>data[p].old||data[p].new).map(partText).join("\n\n");}
+async function copy(text,btn){
+  try{await navigator.clipboard.writeText(text);}
+  catch{const t=document.createElement("textarea");t.value=text;document.body.appendChild(t);t.select();document.execCommand("copy");t.remove();}
+  if(btn){const o=btn.textContent;btn.textContent="Copied";setTimeout(()=>btn.textContent=o,1200);}
+}
+$("copyAll").onclick=e=>{const t=allText(); if(t) copy(t,e.target); else status("Nothing scanned yet.","err");};
+$("csv").onclick=()=>{
+  const rows=[["Part","Old Serial","New Serial"],...PARTS.filter(p=>data[p].old||data[p].new).map(p=>[p,data[p].old,data[p].new])];
+  if(rows.length<2) return status("Nothing scanned yet.","err");
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  a.download=`part-swap-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+};
+$("clear").onclick=()=>{ if(!confirm("Clear all serial numbers?")) return;
+  PARTS.forEach(p=>data[p]={old:"",new:""}); part="Fuser"; target="old"; status(""); renderAll(); };
+
+/* ---------- Accept a scan ---------- */
+let lastAdded={text:"",t:0};
+function clean(t){return String(t).trim().replace(/^\*|\*$/g,"").toUpperCase();}
+
+function accept(raw,source){
+  const text=clean(raw); if(!text) return;
+  const now=Date.now();
+  if(source==="camera" && text===lastAdded.text && now-lastAdded.t<3000) return; // same label still in view
+  if(!target){ status(`${part} is complete. Pick another part, or tap a serial to rescan it.`,"err"); return; }
+  const d=data[part], other=target==="old"?d.new:d.old;
+  if(text===other){
+    if(source!=="camera") status(`That's the same serial as the ${target==="old"?"New":"Old"} ${part}. Scan the other part.`,"err");
+    return;
+  }
+  lastAdded={text,t:now};
+  const slot=target; d[slot]=text;
+  if(navigator.vibrate) navigator.vibrate(60); beep();
+  status(`${slot==="old"?"Old":"New"} ${part}: ${text}`,"ok");
+  autoTarget(); renderAll();
+}
+function beep(){ if(!$("beep").checked) return;
+  try{const c=new (window.AudioContext||window.webkitAudioContext)();const o=c.createOscillator();const g=c.createGain();
+  o.frequency.value=1800;g.gain.value=.08;o.connect(g);g.connect(c.destination);o.start();setTimeout(()=>{o.stop();c.close()},90);}catch(e){} }
+
+/* ---------- Engines ---------- */
+let detector=null;
+const WANT=["code_39","code_128","code_93","qr_code","data_matrix","itf"];
+const nativeReady=(async()=>{
+  if(!("BarcodeDetector" in window)) return;
+  try{const sup=await BarcodeDetector.getSupportedFormats();const f=WANT.filter(x=>sup.includes(x));
+      if(f.includes("code_39")) detector=new BarcodeDetector({formats:f});}catch(e){}
+})();
+const F=window.Html5QrcodeSupportedFormats;
+const libCfg={formatsToSupport:F?[F.CODE_39,F.CODE_128,F.CODE_93,F.QR_CODE,F.DATA_MATRIX,F.ITF]:[],verbose:false,experimentalFeatures:{useBarCodeDetectorIfSupported:true}};
+let camLib=null,fileLib=null;
+function lib(){ if(!window.Html5Qrcode) throw new Error("Scanner library failed to load");
+  camLib??=new Html5Qrcode("reader",libCfg); fileLib??=new Html5Qrcode("filereader",libCfg); }
+
+// Camera reads must match twice in a row (Code 39 has no check digit).
+let pending={text:"",n:0,t:0};
+function cameraHit(raw){
+  const text=clean(raw), now=Date.now();
+  if(pending.text===text && now-pending.t<1500) pending.n++; else pending={text,n:1,t:now};
+  pending.t=now;
+  if(pending.n>=2){ pending={text:"",n:0,t:0}; accept(text,"camera"); }
+}
+
+/* ---------- Camera ---------- */
+let running=false,mode=null,stream=null,loop=null,busy=false;
+const HIRES={facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080},advanced:[{focusMode:"continuous"}]};
+async function start(){
+  status("Starting camera…"); await nativeReady;
+  try{
+    if(detector){
+      stream=await navigator.mediaDevices.getUserMedia({video:HIRES,audio:false});
+      const v=$("video"); v.srcObject=stream; v.style.display="block"; await v.play();
+      $("guide").style.display="block"; mode="native";
+      loop=setInterval(async()=>{ if(busy||v.readyState<2) return; busy=true;
+        try{const r=await detector.detect(v); if(r.length) cameraHit(r[0].rawValue);}catch(e){} busy=false; },100);
+    }else{
+      lib();
+      await camLib.start({facingMode:"environment"},
+        {fps:15,videoConstraints:HIRES,qrbox:(w,h)=>({width:Math.floor(w*.94),height:Math.max(80,Math.floor(h*.4))})},
+        t=>cameraHit(t),()=>{});
+      mode="lib";
+    }
+    running=true; $("idle").style.display="none"; $("toggle").textContent="Stop camera";
+    status("Hold the phone sideways, 4–8 inches away, barcode level across the line.");
+  }catch(e){ status("Camera unavailable ("+(e?.message||e)+"). Allow camera access, or use Scan a photo.","err"); }
+}
+async function stop(){
+  clearInterval(loop); loop=null;
+  if(stream){stream.getTracks().forEach(t=>t.stop()); stream=null;}
+  if(mode==="lib"){try{await camLib.stop();}catch(e){}}
+  $("video").style.display="none"; $("guide").style.display="none";
+  running=false; mode=null; $("idle").style.display=""; $("toggle").textContent="Start camera";
+}
+$("toggle").onclick=()=>running?stop():start();
+
+/* ---------- Photos ---------- */
+function variant(bmp,maxSide,rot){
+  const s=Math.min(1,maxSide/Math.max(bmp.width,bmp.height));
+  const w=Math.round(bmp.width*s),h=Math.round(bmp.height*s);
+  const c=document.createElement("canvas"),sw=rot%180?h:w,sh=rot%180?w:h;
+  c.width=sw;c.height=sh;const x=c.getContext("2d");
+  x.translate(sw/2,sh/2);x.rotate(rot*Math.PI/180);x.drawImage(bmp,-w/2,-h/2,w,h);return c;
+}
+const toFile=c=>new Promise(r=>c.toBlob(b=>r(new File([b],"v.jpg",{type:"image/jpeg"})),"image/jpeg",.95));
+$("file").onchange=async e=>{
+  const f=e.target.files[0]; e.target.value=""; if(!f) return;
+  if(running) await stop();
+  status("Reading photo…"); await nativeReady;
+  let bmp; try{bmp=await createImageBitmap(f);}catch(err){return status("Couldn't open that image.","err");}
+  for(const [size,rot] of [[1600,0],[2400,0],[1000,0],[1600,90],[1600,270],[2400,90]]){
+    const c=variant(bmp,size,rot);
+    if(detector){try{const r=await detector.detect(c); if(r.length) return accept(r[0].rawValue,"photo");}catch(err){}}
+    else{try{lib(); const r=await fileLib.scanFileV2(await toFile(c),false); return accept(r.decodedText,"photo");}catch(err){}}
+  }
+  status("No barcode found. Retake closer with the whole barcode in frame, in focus, without glare.","err");
+};
+
+/* ---------- Manual ---------- */
+function addManual(){const v=$("manualIn").value; if(!v.trim()) return; accept(v,"keyboard"); $("manualIn").value="";}
+$("manualAdd").onclick=addManual;
+$("manualIn").onkeydown=e=>{if(e.key==="Enter") addManual();};
+
+renderAll();
+</script>
